@@ -559,13 +559,14 @@ static int parse_aprs_telem(struct pbuf_t *pb, const char *body, const char *bod
 	DEBUG_LOG("parse_aprs_telem");
 
 	//pbuf_fill_pos(pb, lat, lng, 0, 0);
-	return 0;
+	return 1; // okay
 }
 
 /*
  *	Parse a MIC-E position packet
  *
  *	APRS PROTOCOL REFERENCE 1.0.1 Chapter 10, page 42 (52 in PDF)
+ *
  */
 
 static int parse_aprs_mice(struct pbuf_t *pb, const unsigned char *body, const unsigned char *body_end)
@@ -598,14 +599,18 @@ static int parse_aprs_mice(struct pbuf_t *pb, const unsigned char *body, const u
 	for (i = 0; i < 3; i++)
 		if (!((d_start[i] >= '0' && d_start[i] <= '9')
 			|| (d_start[i] >= 'A' && d_start[i] <= 'L')
-			|| (d_start[i] >= 'P' && d_start[i] <= 'Z')))
-				return 0;
+			|| (d_start[i] >= 'P' && d_start[i] <= 'Z'))) {
+			DEBUG_LOG(".. bad destcall characters in posits 1..3");
+			return 0;
+                }
 	
 	for (i = 3; i < 6; i++)
 		if (!((d_start[i] >= '0' && d_start[i] <= '9')
 			|| (d_start[i] == 'L')
-			|| (d_start[i] >= 'P' && d_start[i] <= 'Z')))
-				return 0;
+			|| (d_start[i] >= 'P' && d_start[i] <= 'Z'))) {
+			DEBUG_LOG(".. bad destcall characters in posits 4..6");
+			return 0;
+                }
 	
 	DEBUG_LOG("\tpassed dstcall format check");
 	
@@ -615,15 +620,39 @@ static int parse_aprs_mice(struct pbuf_t *pb, const unsigned char *body, const u
 	 *   0          1          23            4          5          6              7
 	 * /^[\x26-\x7f][\x26-\x61][\x1c-\x7f]{2}[\x1c-\x7d][\x1c-\x7f][\x21-\x7b\x7d][\/\\A-Z0-9]/
 	 */
-	if (body[0] < 0x26 || (unsigned char)body[0] > 0x7f) return 0;
-	if (body[1] < 0x26 || (unsigned char)body[1] > 0x61) return 0;
-	if (body[2] < 0x1c || (unsigned char)body[2] > 0x7f) return 0;
-	if (body[3] < 0x1c || (unsigned char)body[3] > 0x7f) return 0;
-	if (body[4] < 0x1c || (unsigned char)body[4] > 0x7d) return 0;
-	if (body[5] < 0x1c || (unsigned char)body[5] > 0x7f) return 0;
-	if ((body[6] < 0x21 || (unsigned char)body[6] > 0x7b)
-		&& (unsigned char)body[6] != 0x7d) return 0;
-	if (!valid_sym_table_uncompressed(body[7])) return 0;
+	if (body[0] < 0x26 || body[0] > 0x7f) {
+		DEBUG_LOG("..bad infofield column 1");
+		return 0;
+	}
+	if (body[1] < 0x26 || body[1] > 0x61) {
+		DEBUG_LOG("..bad infofield column 2");
+		return 0;
+	}
+	if (body[2] < 0x1c || body[2] > 0x7f) {
+		DEBUG_LOG("..bad infofield column 3");
+		return 0;
+	}
+	if (body[3] < 0x1c || body[3] > 0x7f) {
+		DEBUG_LOG("..bad infofield column 4");
+		return 0;
+	}
+	if (body[4] < 0x1c || body[4] > 0x7d) {
+		DEBUG_LOG("..bad infofield column 5");
+		return 0;
+	}
+	if (body[5] < 0x1c || body[5] > 0x7f) {
+		DEBUG_LOG("..bad infofield column 6");
+		return 0;
+	}
+	if ((body[6] < 0x21 || body[6] > 0x7b)
+		&& body[6] != 0x7d) {
+		DEBUG_LOG("..bad infofield column 7");
+		return 0;
+	}
+	if (!valid_sym_table_uncompressed(body[7])) {
+		DEBUG_LOG("..bad symbol table entry on column 8");
+		return 0;
+	}
 	
 	DEBUG_LOG("\tpassed info format check");
 	
@@ -648,14 +677,20 @@ static int parse_aprs_mice(struct pbuf_t *pb, const unsigned char *body, const u
 	}
 	//fprintf(stderr, "\ttranslated dstcall: %s\n", dstcall);
 	
-	/* position ambiquity is going to get ignored now, it's not needed in this application. */
+	// position ambiquity is going to get ignored now,
+        // it's not needed in this application.
 	if (dstcall[5] == '_') { dstcall[5] = '5'; posambiguity = 1; }
 	if (dstcall[4] == '_') { dstcall[4] = '5'; posambiguity = 2; }
 	if (dstcall[3] == '_') { dstcall[3] = '5'; posambiguity = 3; }
 	if (dstcall[2] == '_') { dstcall[2] = '3'; posambiguity = 4; }
-	if (dstcall[1] == '_' || dstcall[0] == '_') { return 0; } /* cannot use posamb here */
+	if (dstcall[1] == '_' || dstcall[0] == '_') {
+		DEBUG_LOG("..bad pos-ambiguity on destcall");
+		return 0;
+	} // cannot use posamb here
 	
-	/* convert to degrees, minutes and decimal degrees, and then to a float lat */
+	// convert to degrees, minutes and decimal degrees,
+	//  and then to a float lat
+
 	if (sscanf(dstcall, "%2u%2u%2u",
 	    &lat_deg, &lat_min, &lat_min_frag) != 3) {
 		DEBUG_LOG("\tsscanf failed");
@@ -663,7 +698,7 @@ static int parse_aprs_mice(struct pbuf_t *pb, const unsigned char *body, const u
 	}
 	lat = (float)lat_deg + (float)lat_min / 60.0 + (float)lat_min_frag / 6000.0;
 	
-	/* check the north/south direction and correct the latitude if necessary */
+	// check the north/south direction and correct the latitude if necessary
 	if (d_start[3] <= 0x4c)
 		lat = 0 - lat;
 	
@@ -711,6 +746,7 @@ static int parse_aprs_mice(struct pbuf_t *pb, const unsigned char *body, const u
 		lng = (float)lng_deg + 0.5;
 		break;
 	default:
+		DEBUG_LOG(".. posambiguity code BUG!");
 		return 0;
 	}
 	
@@ -737,14 +773,16 @@ static int parse_aprs_mice(struct pbuf_t *pb, const unsigned char *body, const u
  *	Parse a compressed APRS position packet
  *
  *	APRS PROTOCOL REFERENCE 1.0.1 Chapter 9, page 36 (46 in PDF)
+ *
  */
 
 static int parse_aprs_compressed(struct pbuf_t *pb, const char *body, const char *body_end)
 {
 	char sym_table, sym_code;
 	int i;
-	int lat1, lat2, lat3, lat4, lng1, lng2, lng3, lng4;
-	double lat = 0.0, lng = 0.0;
+	int lat1, lat2, lat3, lat4;
+        int lng1, lng2, lng3, lng4;
+	float lat, lng;
 	
 	DEBUG_LOG("parse_aprs_compressed");
 	
@@ -753,8 +791,10 @@ static int parse_aprs_compressed(struct pbuf_t *pb, const char *body, const char
 	 * Also check the allowed base-91 characters at the same time.
 	 */ 
 	
-	if (body_end - body < 13)
+	if (body_end - body < 13) {
+		DEBUG_LOG("\ttoo short");
 		return 0; /* too short. */
+        }
 	
 	sym_table = body[0]; /* has been validated before entering this function */
 	sym_code = body[9];
@@ -793,6 +833,7 @@ static int parse_aprs_compressed(struct pbuf_t *pb, const char *body, const char
  *	Parse an uncompressed "normal" APRS packet
  *
  *	APRS PROTOCOL REFERENCE 1.0.1 Chapter 8, page 32 (42 in PDF)
+ *
  */
 
 static int parse_aprs_uncompressed(struct pbuf_t *pb, const char *body, const char *body_end)
@@ -817,7 +858,9 @@ static int parse_aprs_uncompressed(struct pbuf_t *pb, const char *body, const ch
 	posbuf[19] = 0;
 	// fprintf(stderr, "\tposbuf: %s\n", posbuf);
 	
-	/* position ambiquity is going to get ignored now, it's not needed in this application. */
+	// position ambiquity is going to get ignored now,
+        // it's not needed in this application.
+
 	/* lat */
 	if (posbuf[2] == ' ') posbuf[2] = '3';
 	if (posbuf[3] == ' ') posbuf[3] = '5';
@@ -875,6 +918,7 @@ static int parse_aprs_uncompressed(struct pbuf_t *pb, const char *body, const ch
  *	Parse an APRS object 
  *
  *	APRS PROTOCOL REFERENCE 1.0.1 Chapter 11, page 58 (68 in PDF)
+ *
  */
 
 static int parse_aprs_object(struct pbuf_t *pb, const char *body, const char *body_end)
@@ -936,6 +980,7 @@ static int parse_aprs_object(struct pbuf_t *pb, const char *body, const char *bo
  *	Parse an APRS item
  *
  *	APRS PROTOCOL REFERENCE 1.0.1 Chapter 11, page 59 (69 in PDF)
+ *
  */
 
 static int parse_aprs_item(struct pbuf_t *pb, const char *body, const char *body_end)
@@ -995,6 +1040,7 @@ static int parse_aprs_item(struct pbuf_t *pb, const char *body, const char *body
  *
  * TODO: Recognize TELEM packets in !/=@ packets too!
  *
+ *	Return 0 for parse failures, 1 for OK.
  */
 
 int parse_aprs(struct pbuf_t *pb)
@@ -1056,19 +1102,19 @@ int parse_aprs(struct pbuf_t *pb)
 			pb->packettype |= T_POSITION;
 			return parse_aprs_mice(pb, (unsigned char *)body, (unsigned char *)body_end);
 		}
-		return 0;
+		return 0; // bad
 
 	case '!':
 		if (pb->info_start[1] == '!') { /* Ultimeter 2000 */
 			pb->packettype |= T_WX;
-			return 0;
+			return 1; // Known Ultimeter format
 		}
 	case '=':
 	case '/':
 	case '@':
 		/* check that we won't run over right away */
 		if (body_end - body < 10)
-			return 0;
+			return 0; // bad
 		/* Normal or compressed location packet, with or without
 		 * timestamp, with or without messaging capability
 		 *
@@ -1175,47 +1221,46 @@ int parse_aprs(struct pbuf_t *pb)
 				pb->cos_lat = history->coslat;
 
 				pb->flags  |= F_HASPOS;
-				return 1;
 			}
 			*/
 		}
-		return 0;
+		return 1; // OK format (whatever it was)
 
 	case ';':
 		if (body_end - body > 29)
 			return parse_aprs_object(pb, body, body_end);
-		return 0;
+		return 0; // too short
 
 	case '>':
 		pb->packettype |= T_STATUS;
-		return 0;
+		return 1; // ok
 
 	case '<':
 		pb->packettype |= T_STATCAPA;
-		return 0;
+		return 1; // ok
 
 	case '?':
 		pb->packettype |= T_QUERY;
-		return 0;
+		return 0; // bad at APRS-IS
 
 	case ')':
 		if (body_end - body > 18) {
 			return parse_aprs_item(pb, body, body_end);
 		}
-		return 0;
+		return 0; // too short
 
 	case 'T':
 		if (body_end - body > 18) {
 			pb->packettype |= T_TELEMETRY;
 			return parse_aprs_telem(pb, body, body_end);
 		}
-		return 0;
+		return 0; // too short
 
 	case '#': /* Peet Bros U-II Weather Station */
 	case '*': /* Peet Bros U-I  Weather Station */
 	case '_': /* Weather report without position */
 		pb->packettype |= T_WX;
-		return 0;
+		return 1; // good
 
 	case '{':
 		pb->packettype |= T_USERDEF;
@@ -1223,7 +1268,7 @@ int parse_aprs(struct pbuf_t *pb)
         
         case '}':
 		pb->packettype |= T_3RDPARTY;
-		return 0;
+		return 0; // no 3rd-party into APRS-IS.
 
 	default:
 		break;
@@ -1249,7 +1294,7 @@ int parse_aprs(struct pbuf_t *pb)
 		}
 	}
 	
-	return 0;
+	return 0; // bad
 }
 
 /*
